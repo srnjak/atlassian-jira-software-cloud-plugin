@@ -1,8 +1,7 @@
-package com.atlassian.jira.cloud.jenkins.deploymentinfo.service;
+package com.atlassian.jira.cloud.jenkins.util;
 
 import com.atlassian.jira.cloud.jenkins.common.model.IssueKey;
 import com.atlassian.jira.cloud.jenkins.common.service.IssueKeyExtractor;
-import com.atlassian.jira.cloud.jenkins.util.IssueKeyStringExtractor;
 import hudson.plugins.git.GitChangeSet;
 import hudson.scm.ChangeLogSet;
 import org.jenkinsci.plugins.workflow.job.WorkflowRun;

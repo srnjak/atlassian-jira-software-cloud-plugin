@@ -1,6 +1,7 @@
-package com.atlassian.jira.cloud.jenkins.deploymentinfo.service;
+package com.atlassian.jira.cloud.jenkins.util;
 
 import com.atlassian.jira.cloud.jenkins.common.service.IssueKeyExtractor;
+import com.atlassian.jira.cloud.jenkins.util.BranchNameAndChangeLogIssueKeyExtractor;
 import com.google.common.collect.ImmutableList;
 import hudson.plugins.git.GitChangeSet;
 import hudson.scm.ChangeLogSet;
@@ -12,19 +13,25 @@ import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.Collections;
 import java.util.Set;
+import jenkins.plugins.git.GitBranchSCMHead;
+import jenkins.plugins.git.GitBranchSCMRevision;
+import jenkins.plugins.git.GitSCMSource;
+import jenkins.scm.api.SCMRevisionAction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
-public class ChangeLogExtractorTest {
+public class BranchNameAndChangeLogExtractorTest {
 
-    private IssueKeyExtractor changeLogExtractor;
+    private IssueKeyExtractor branchNameAndChangeLogExtractor;
+
+    private static final String BRANCH_NAME = "TEST-456-branch-name";
 
     @Before
     public void setUp() {
-        changeLogExtractor = new ChangeLogIssueKeyExtractor();
+        branchNameAndChangeLogExtractor = new BranchNameAndChangeLogIssueKeyExtractor();
     }
 
     @Test
@@ -33,58 +40,46 @@ public class ChangeLogExtractorTest {
         final WorkflowRun workflowRun = workflowRunWithNoChangeSets();
 
         // when
-        final Set<String> issueKeys = changeLogExtractor.extractIssueKeys(workflowRun);
+        final Set<String> issueKeys = branchNameAndChangeLogExtractor.extractIssueKeys(workflowRun);
 
         // then
         assertThat(issueKeys).isEmpty();
     }
 
     @Test
-    public void testExtractIssueKeys_forOneChangeSetEntry() {
+    public void testExtractIssueKeys_forOneChangeLogSetEntry() {
         // given
-        final WorkflowRun workflowRun = changeSetWithOneChangeSetEntry();
+        final WorkflowRun workflowRun = changeSetWithOneChangeLogSetEntry();
 
         // when
-        final Set<String> issueKeys = changeLogExtractor.extractIssueKeys(workflowRun);
+        final Set<String> issueKeys = branchNameAndChangeLogExtractor.extractIssueKeys(workflowRun);
 
         // then
         assertThat(issueKeys).containsExactlyInAnyOrder("TEST-123");
     }
 
     @Test
-    public void testExtractIssueKeys_forMultipleChangeSetEntries() {
+    public void testExtractIssueKeys_forBranchAndOneChangeSetEntries() {
         // given
-        final WorkflowRun workflowRun = changeSetWithMultipleChangeSetEntries();
+        final WorkflowRun workflowRun = changeSetWithBranchAndOneChangeLogSetEntries();
 
         // when
-        final Set<String> issueKeys = changeLogExtractor.extractIssueKeys(workflowRun);
+        final Set<String> issueKeys = branchNameAndChangeLogExtractor.extractIssueKeys(workflowRun);
 
         // then
-        assertThat(issueKeys).containsExactlyInAnyOrder("TEST-123", "TEST-456");
+        assertThat(issueKeys).containsExactlyInAnyOrder("TEST-456", "TEST-123");
     }
 
     @Test
-    public void testExtractIssueKeys_forMultipleChangeSets() {
+    public void testExtractIssueKeys_forBranchAndMultipleChangeSets() {
         // given
-        final WorkflowRun workflowRun = workflowRunWithMultipleChangeSets();
+        final WorkflowRun workflowRun = workflowRunWithBranchAndMultipleChangeSets();
 
         // when
-        final Set<String> issueKeys = changeLogExtractor.extractIssueKeys(workflowRun);
+        final Set<String> issueKeys = branchNameAndChangeLogExtractor.extractIssueKeys(workflowRun);
 
         // then
-        assertThat(issueKeys).containsExactlyInAnyOrder("TEST-123", "TEST-456");
-    }
-
-    @Test
-    public void testExtractIssueKeys_forSquashedCommits() {
-        // given
-        final WorkflowRun workflowRun = changeSetWithSquashedCommitsInComment();
-
-        // when
-        final Set<String> issueKeys = changeLogExtractor.extractIssueKeys(workflowRun);
-
-        // then
-        assertThat(issueKeys).containsExactlyInAnyOrder("TEST-3", "TEST-4");
+        assertThat(issueKeys).containsExactlyInAnyOrder("TEST-456", "TEST-123", "TEST-789");
     }
 
     @Test
@@ -93,7 +88,7 @@ public class ChangeLogExtractorTest {
         final WorkflowRun workflowRun = workflowRunWithIssuesAboveLimit();
 
         // when
-        final Set<String> issueKeys = changeLogExtractor.extractIssueKeys(workflowRun);
+        final Set<String> issueKeys = branchNameAndChangeLogExtractor.extractIssueKeys(workflowRun);
 
         // then
         assertThat(issueKeys).hasSize(100);
@@ -103,10 +98,11 @@ public class ChangeLogExtractorTest {
         final WorkflowRun workflowRun = mock(WorkflowRun.class);
 
         when(workflowRun.getChangeSets()).thenReturn(Collections.emptyList());
+        setEmptyBranchSCM(workflowRun);
         return workflowRun;
     }
 
-    private WorkflowRun changeSetWithOneChangeSetEntry() {
+    private WorkflowRun changeSetWithOneChangeLogSetEntry() {
         final ChangeLogSet.Entry entry = mock(ChangeLogSet.Entry.class);
         when(entry.getMsg()).thenReturn("TEST-123 Commit message");
         final ChangeLogSet changeLogSet = mock(ChangeLogSet.class);
@@ -114,27 +110,29 @@ public class ChangeLogExtractorTest {
         final WorkflowRun workflowRun = mock(WorkflowRun.class);
 
         when(workflowRun.getChangeSets()).thenReturn(ImmutableList.of(changeLogSet));
+
+        setEmptyBranchSCM(workflowRun);
         return workflowRun;
     }
 
-    private WorkflowRun changeSetWithMultipleChangeSetEntries() {
-        final ChangeLogSet.Entry entry1 = mock(ChangeLogSet.Entry.class);
-        final ChangeLogSet.Entry entry2 = mock(ChangeLogSet.Entry.class);
-        when(entry1.getMsg()).thenReturn("TEST-123 Commit message");
-        when(entry2.getMsg()).thenReturn("TEST-456 Commit message");
+    private WorkflowRun changeSetWithBranchAndOneChangeLogSetEntries() {
+        final ChangeLogSet.Entry entry = mock(ChangeLogSet.Entry.class);
+        when(entry.getMsg()).thenReturn("TEST-123 Commit message");
         final ChangeLogSet changeLogSet = mock(ChangeLogSet.class);
-        when(changeLogSet.getItems()).thenReturn(new Object[] {entry1, entry2});
+        when(changeLogSet.getItems()).thenReturn(new Object[] {entry});
         final WorkflowRun workflowRun = mock(WorkflowRun.class);
 
         when(workflowRun.getChangeSets()).thenReturn(ImmutableList.of(changeLogSet));
+
+        setWithBranchSCM(workflowRun);
         return workflowRun;
     }
 
-    private WorkflowRun workflowRunWithMultipleChangeSets() {
+    private WorkflowRun workflowRunWithBranchAndMultipleChangeSets() {
         final ChangeLogSet.Entry entry1 = mock(ChangeLogSet.Entry.class);
         final ChangeLogSet.Entry entry2 = mock(ChangeLogSet.Entry.class);
         when(entry1.getMsg()).thenReturn("TEST-123 Commit message");
-        when(entry2.getMsg()).thenReturn("TEST-456 Commit message");
+        when(entry2.getMsg()).thenReturn("TEST-789 Commit message");
         final ChangeLogSet changeLogSet1 = mock(ChangeLogSet.class);
         final ChangeLogSet changeLogSet2 = mock(ChangeLogSet.class);
         when(changeLogSet1.getItems()).thenReturn(new Object[] {entry1});
@@ -143,27 +141,13 @@ public class ChangeLogExtractorTest {
 
         when(workflowRun.getChangeSets())
                 .thenReturn(ImmutableList.of(changeLogSet1, changeLogSet2));
-        return workflowRun;
-    }
 
-    private WorkflowRun changeSetWithSquashedCommitsInComment() {
-        final GitChangeSet entry = mock(GitChangeSet.class);
-        when(entry.getComment())
-                .thenReturn(
-                        "Squashed Commit title (#12)\n"
-                                + "* TEST-3 Fix bug #1\n"
-                                + "\n"
-                                + "* TEST-4 Fix bug #2\n");
-        final ChangeLogSet changeLogSet = mock(ChangeLogSet.class);
-        when(changeLogSet.getItems()).thenReturn(new Object[] {entry});
-        final WorkflowRun workflowRun = mock(WorkflowRun.class);
-
-        when(workflowRun.getChangeSets()).thenReturn(ImmutableList.of(changeLogSet));
+        setWithBranchSCM(workflowRun);
         return workflowRun;
     }
 
     private WorkflowRun workflowRunWithIssuesAboveLimit() {
-        int count = 105;
+        int count = 100;
         Object[] changeSetEntries = new Object[count];
         for (int i = 0; i < count; i++) {
             final ChangeLogSet.Entry entry = mock(ChangeLogSet.Entry.class);
@@ -176,6 +160,24 @@ public class ChangeLogExtractorTest {
         final WorkflowRun workflowRun = mock(WorkflowRun.class);
 
         when(workflowRun.getChangeSets()).thenReturn(ImmutableList.of(changeLogSet));
+
+        setEmptyBranchSCM(workflowRun);
         return workflowRun;
+    }
+
+    private void setEmptyBranchSCM(WorkflowRun mockWorkflowRun) {
+
+        final GitBranchSCMHead head = new GitBranchSCMHead("");
+        final SCMRevisionAction scmRevisionAction =
+                new SCMRevisionAction(new GitSCMSource(""), new GitBranchSCMRevision(head, ""));
+        when(mockWorkflowRun.getAction(SCMRevisionAction.class)).thenReturn(scmRevisionAction);
+    }
+
+    private void setWithBranchSCM(WorkflowRun mockWorkflowRun) {
+
+        final GitBranchSCMHead head = new GitBranchSCMHead(BRANCH_NAME);
+        final SCMRevisionAction scmRevisionAction =
+                new SCMRevisionAction(new GitSCMSource(""), new GitBranchSCMRevision(head, ""));
+        when(mockWorkflowRun.getAction(SCMRevisionAction.class)).thenReturn(scmRevisionAction);
     }
 }

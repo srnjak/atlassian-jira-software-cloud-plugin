@@ -10,8 +10,11 @@ import com.atlassian.jira.cloud.jenkins.common.service.IssueKeyExtractor;
 import com.atlassian.jira.cloud.jenkins.config.JiraCloudSiteConfig;
 import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.Association;
 import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.AssociationType;
+import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.Command;
 import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.DeploymentApiResponse;
 import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.DeploymentKeyResponse;
+import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.Deployments;
+import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.JiraDeploymentInfo;
 import com.atlassian.jira.cloud.jenkins.deploymentinfo.client.model.RejectedDeploymentResponse;
 import com.atlassian.jira.cloud.jenkins.tenantinfo.CloudIdResolver;
 import com.atlassian.jira.cloud.jenkins.util.RunWrapperProvider;
@@ -24,11 +27,13 @@ import org.jenkinsci.plugins.workflow.support.steps.build.RunWrapper;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.Collections;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static com.atlassian.jira.cloud.jenkins.common.response.JiraSendInfoResponse.Status.FAILURE_SECRET_NOT_FOUND;
@@ -41,6 +46,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -120,9 +126,12 @@ public class JiraDeploymentInfoSenderImplTest {
         final JiraSendInfoResponse response = classUnderTest.sendDeploymentInfo(createRequest());
 
         // then
-        assertThat(response.getStatus()).isEqualTo(SKIPPED_ISSUE_KEYS_NOT_FOUND_AND_SERVICE_IDS_ARE_EMPTY);
+        assertThat(response.getStatus())
+                .isEqualTo(SKIPPED_ISSUE_KEYS_NOT_FOUND_AND_SERVICE_IDS_ARE_EMPTY);
         final String message = response.getMessage();
-        assertThat(message).startsWith("No issue keys found in the change log and service ids were not provided");
+        assertThat(message)
+                .startsWith(
+                        "No issue keys found in the change log and service ids were not provided");
     }
 
     @Test
@@ -172,6 +181,23 @@ public class JiraDeploymentInfoSenderImplTest {
         final JiraSendInfoResponse response = classUnderTest.sendDeploymentInfo(createRequest());
 
         // then
+        assertThat(response.getStatus())
+                .isEqualTo(JiraSendInfoResponse.Status.SUCCESS_DEPLOYMENT_ACCEPTED);
+        final String message = response.getMessage();
+        assertThat(message).isNotBlank();
+    }
+
+    @Test
+    public void testSendDeploymentInfo_whenDeploymentAcceptedWithExternalIssueKeys() {
+        // given
+        setupDeploymentsApiDeploymentAccepted();
+
+        // when
+        final JiraSendInfoResponse response =
+                classUnderTest.sendDeploymentInfo(createRequest(ImmutableSet.of("TEST-123")));
+
+        // then
+        verifyZeroInteractions(issueKeyExtractor);
         assertThat(response.getStatus())
                 .isEqualTo(JiraSendInfoResponse.Status.SUCCESS_DEPLOYMENT_ACCEPTED);
         final String message = response.getMessage();
@@ -264,6 +290,39 @@ public class JiraDeploymentInfoSenderImplTest {
     }
 
     @Test
+    public void testSendDeploymentInfo_whenGateEnabled() {
+        // given
+        setupDeploymentsApiDeploymentAccepted();
+        final JiraDeploymentInfoRequest request =
+                new JiraDeploymentInfoRequest(
+                        SITE,
+                        ENVIRONMENT_ID,
+                        ENVIRONMENT_NAME,
+                        ENVIRONMENT_TYPE,
+                        "pending",
+                        Collections.emptySet(),
+                        Boolean.TRUE,
+                        Collections.emptySet(),
+                        mockWorkflowRun());
+
+        final ArgumentCaptor<Deployments> deploymentsArgumentCaptor =
+                ArgumentCaptor.forClass(Deployments.class);
+
+        // when
+        final JiraSendInfoResponse response = classUnderTest.sendDeploymentInfo(request);
+
+        // then
+        assertThat(response.getStatus())
+                .isEqualTo(JiraSendInfoResponse.Status.SUCCESS_DEPLOYMENT_ACCEPTED);
+        verify(deploymentsApi)
+                .postUpdate(any(), any(), any(), deploymentsArgumentCaptor.capture(), any());
+        final JiraDeploymentInfo jiraDeploymentInfo =
+                deploymentsArgumentCaptor.getValue().getDeployments().get(0);
+        assertThat(jiraDeploymentInfo.getCommands())
+                .contains(new Command("initiate_deployment_gating"));
+    }
+
+    @Test
     public void getDeploymentState_whenUsedJenkinsRunState() {
         // given
         when(issueKeyExtractor.extractIssueKeys(any())).thenReturn(Collections.emptySet());
@@ -278,6 +337,10 @@ public class JiraDeploymentInfoSenderImplTest {
     }
 
     private JiraDeploymentInfoRequest createRequest() {
+        return createRequest(Collections.emptySet());
+    }
+
+    private JiraDeploymentInfoRequest createRequest(final Set<String> issueKeys) {
         return new JiraDeploymentInfoRequest(
                 SITE,
                 ENVIRONMENT_ID,
@@ -285,6 +348,8 @@ public class JiraDeploymentInfoSenderImplTest {
                 ENVIRONMENT_TYPE,
                 null,
                 Collections.emptySet(),
+                Boolean.FALSE,
+                issueKeys,
                 mockWorkflowRun());
     }
 
@@ -295,6 +360,8 @@ public class JiraDeploymentInfoSenderImplTest {
                 ENVIRONMENT_NAME,
                 ENVIRONMENT_TYPE,
                 state,
+                Collections.emptySet(),
+                Boolean.FALSE,
                 Collections.emptySet(),
                 mockWorkflowRun());
     }
@@ -309,6 +376,8 @@ public class JiraDeploymentInfoSenderImplTest {
                 environmentName,
                 environmentType,
                 null,
+                Collections.emptySet(),
+                Boolean.FALSE,
                 Collections.emptySet(),
                 mockWorkflowRun());
     }

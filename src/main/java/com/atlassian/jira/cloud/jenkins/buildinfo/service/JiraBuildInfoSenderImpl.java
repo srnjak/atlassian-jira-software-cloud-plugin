@@ -86,6 +86,7 @@ public class JiraBuildInfoSenderImpl implements JiraBuildInfoSender {
         }
 
         final Set<String> issueKeys = getIssueKeys(request, build);
+        log.info("Jira issueKeys: " + String.join(", ", issueKeys));
 
         if (issueKeys.isEmpty()) {
             return JiraBuildInfoResponse.skippedIssueKeysNotFound();

@@ -191,7 +191,8 @@ public class JiraBuildInfoSenderImplTest {
     @Test
     public void testSendBuildInfo_whenUserProvidedBranch() {
         // given
-        final JiraBuildInfoRequest jiraBuildInfoRequest = new JiraBuildInfoRequest(SITE, BRANCH_NAME, mockWorkflowRun());
+        final JiraBuildInfoRequest jiraBuildInfoRequest =
+                new JiraBuildInfoRequest(SITE, BRANCH_NAME, mockWorkflowRun());
         setupBuildsApiBuildAccepted();
 
         // when
@@ -225,7 +226,7 @@ public class JiraBuildInfoSenderImplTest {
     private void setupMocks() {
         setupSiteConfigRetriever();
         setupSecretRetriever();
-        setupIssueKeyExtractor();
+        setupBranchNameAndIssueKeyExtractor();
         setupCloudIdResolver();
         setupAccessTokenRetriever();
         setupRunWrapperProvider();
@@ -240,7 +241,7 @@ public class JiraBuildInfoSenderImplTest {
         when(secretRetriever.getSecretFor(any())).thenReturn(Optional.of("secret"));
     }
 
-    private void setupIssueKeyExtractor() {
+    private void setupBranchNameAndIssueKeyExtractor() {
         when(issueKeyExtractor.extractIssueKeys(any())).thenReturn(ImmutableSet.of("TEST-123"));
     }
 
